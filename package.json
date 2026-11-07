@@ -1,0 +1,15 @@
+{
+  "name": "hvac-lead-autopilot",
+  "version": "1.0.0",
+  "description": "Inbound HVAC service request -> AI triage -> mini CRM -> bilingual reply draft -> tech alert",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/run.ts data/sample-leads.json",
+    "server": "node src/server.ts",
+    "test": "node --test test/*.test.ts"
+  },
+  "author": "Gabriel Nadal",
+  "license": "MIT"
+}

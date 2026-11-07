@@ -1,0 +1,380 @@
+{
+  "name": "HVAC Lead Autopilot",
+  "nodes": [
+    {
+      "id": "a1",
+      "name": "New Service Request (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hvac-lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "hvac-lead-autopilot"
+    },
+    {
+      "id": "a2",
+      "name": "Validate & Clean Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// n8n Code node: \"Validate & Clean Lead\"  (mode: Run Once for Each Item)\n// Takes the raw webhook body, cleans it up, and marks whether it's usable.\nconst b = $json.body ?? $json;                       // Webhook puts the form data in .body\nconst message = String(b.message ?? '').trim();\n\n// Turn any US phone format into (305) 555-1234; blank if it isn't 10 digits.\nlet digits = String(b.phone ?? '').replace(/\\D/g, '');\nif (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);\nconst phone = digits.length === 10 ? `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}` : '';\n\nreturn {\n  json: {\n    valid: message.length > 0,                       // a blank message can't be triaged\n    lead: {\n      id: b.id || `lead-${Date.now()}`,\n      name: String(b.name ?? '').trim(),\n      phone,\n      email: b.email || '',\n      address: b.address || '',\n      message,\n      source: b.source || 'webhook',\n      receivedAt: b.receivedAt || new Date().toISOString(),\n    },\n  },\n};\n"
+      }
+    },
+    {
+      "id": "a3",
+      "name": "Has a Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a4",
+      "name": "Reject Empty Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        500
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"Lead is missing a message\" } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "a5",
+      "name": "AI Triage (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"gpt-4o-mini\", temperature: 0, response_format: { type: \"json_object\" }, messages: [ { role: \"system\", content: \"You triage inbound service requests for a small residential HVAC company in South Florida.\\nReturn ONLY a JSON object with these keys:\\n- urgency: \\\"emergency\\\" (gas/CO smell, no heat or no AC with a baby/elderly/medical need, active flooding), \\\"urgent\\\" (no heat, no cooling, water leak), or \\\"routine\\\" (tune-ups, quotes, noises, thermostat questions)\\n- jobType: one of no_heat, no_cooling, gas_or_co_safety, water_leak, noise_or_smell, thermostat, maintenance, install_quote, other\\n- language: \\\"en\\\" or \\\"es\\\" — the language the customer wrote in\\n- summary: one short line a technician can read in 3 seconds\\n- equipment: the equipment mentioned (e.g. \\\"heat pump\\\"), or null\\n- preferredTime: any timing the customer asked for, or null\\n- confidence: a number from 0 to 1\" }, { role: \"user\", content: \"Customer message:\\n\" + $json.lead.message } ] }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "notes": "Needs a Header Auth credential: Name = Authorization, Value = Bearer sk-... . No key? Deactivate this node and the workflow runs on the rules engine."
+    },
+    {
+      "id": "a6",
+      "name": "Check AI Answer (fallback + guardrail)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// n8n Code node: \"Check AI Answer (fallback + safety guardrail)\"  (mode: Run Once for Each Item)\n// 1) Use the AI's JSON if it passes validation.  2) Otherwise fall back to keyword rules.\n// 3) Gas / CO words ALWAYS force an emergency, whatever the AI said.\nconst lead = $('Validate & Clean Lead').item.json.lead;\nconst text = lead.message.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n\nconst URGENCIES = ['emergency', 'urgent', 'routine'];\nconst JOB_TYPES = ['no_heat', 'no_cooling', 'gas_or_co_safety', 'water_leak', 'noise_or_smell', 'thermostat', 'maintenance', 'install_quote', 'other'];\nconst GAS = ['gas smell', 'smell gas', 'smells like gas', 'olor a gas', 'huele a gas', 'carbon monoxide', 'co alarm', 'co detector', 'monoxido'];\n\nfunction rules() {\n  const RULES = [\n    ['gas_or_co_safety', GAS],\n    ['no_heat', ['no heat', 'not heating', 'blowing cold', 'sin calefaccion', 'no hay calefaccion', 'no calienta']],\n    ['no_cooling', ['no ac', 'ac not', 'not cooling', 'blowing warm', 'blowing hot', 'sin aire', 'no enfria', 'aire no']],\n    ['water_leak', ['leak', 'dripping', 'flood', 'gotea', 'fuga de agua']],\n    ['noise_or_smell', ['noise', 'loud', 'banging', 'squeal', 'rattle', 'burning smell', 'ruido']],\n    ['thermostat', ['thermostat', 'termostato']],\n    ['maintenance', ['tune-up', 'tune up', 'maintenance', 'checkup', 'clean', 'filter', 'mantenimiento', 'limpieza']],\n    ['install_quote', ['quote', 'estimate', 'new system', 'replace', 'install', 'heat pump', 'cotizacion', 'presupuesto']],\n  ];\n  const hit = RULES.find(([, words]) => words.some((w) => text.includes(w)));\n  const jobType = hit ? hit[0] : 'other';\n  const vulnerable = ['baby', 'elderly', 'grandma', 'oxygen', 'medical', 'bebe', 'abuela', 'anciano'].some((w) => text.includes(w));\n  let urgency = 'routine';\n  if (jobType === 'gas_or_co_safety') urgency = 'emergency';\n  else if (jobType === 'no_heat' || jobType === 'no_cooling') urgency = vulnerable ? 'emergency' : 'urgent';\n  else if (jobType === 'water_leak') urgency = 'urgent';\n  const es = ['hola', 'por favor', 'gracias', 'no hay', 'aire', 'necesito', 'funciona', 'mi casa'].filter((w) => text.includes(w)).length >= 2;\n  return { urgency, jobType, language: es ? 'es' : 'en', summary: `${urgency.toUpperCase()}: ${jobType.replace(/_/g, ' ')}${vulnerable ? ' — vulnerable person in home' : ''}`, confidence: hit ? 0.75 : 0.3 };\n}\n\nlet triage;\nlet classifiedBy;\ntry {\n  // If the AI node is deactivated, its input passes straight through (no \"choices\") — that's normal rules mode.\n  if (!$json.choices && $json.valid !== undefined) throw new Error('AI node off');\n  const ai = JSON.parse($json.choices[0].message.content);\n  if (!URGENCIES.includes(ai.urgency) || !JOB_TYPES.includes(ai.jobType) || !['en', 'es'].includes(ai.language)) {\n    throw new Error('AI answer failed validation');\n  }\n  triage = { ...ai, confidence: Math.min(1, Math.max(0, Number(ai.confidence) || 0.5)) };\n  classifiedBy = 'llm';\n} catch (err) {\n  triage = rules();\n  classifiedBy = err.message === 'AI node off' ? 'rules' : 'rules-fallback';\n}\n\n// SAFETY GUARDRAIL\nif (GAS.some((w) => text.includes(w))) {\n  triage.urgency = 'emergency';\n  triage.jobType = 'gas_or_co_safety';\n}\n\nreturn { json: { lead, triage: { ...triage, classifiedBy } } };\n"
+      }
+    },
+    {
+      "id": "a7",
+      "name": "Time Window, Review & Reply Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// n8n Code node: \"Time Window, Review Checks & Reply Draft\"  (mode: Run Once for Each Item)\nconst { lead, triage } = $json;\nconst BUSINESS = 'Homestead Comfort HVAC';   // <- change to the real company name\nconst PHONE = '(305) 555-0142';              // <- and phone number\nconst now = new Date(lead.receivedAt);\nconst es = triage.language === 'es';\n\n// --- Time window ---\nfunction addBusinessDays(from, n) {\n  const d = new Date(from);\n  while (n > 0) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) n--; }\n  return d.toLocaleDateString(es ? 'es-US' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' });\n}\nlet timeWindow;\nif (triage.urgency === 'emergency') timeWindow = es ? 'hoy, llegada en 2-4 horas' : 'today, arriving within 2-4 hours';\nelse if (triage.urgency === 'urgent') timeWindow = now.getHours() < 14 ? (es ? 'hoy en la tarde (12pm-6pm)' : 'today, afternoon slot (12pm-6pm)') : (es ? 'mañana temprano (8am-11am)' : 'tomorrow, first morning slot (8am-11am)');\nelse timeWindow = `${addBusinessDays(now, 2)} - ${addBusinessDays(now, 5)}`;\n\n// --- When should a person check before anything goes out? ---\nconst reviewReasons = [];\nif (triage.confidence < 0.6) reviewReasons.push('low AI confidence');\nif (!lead.phone && !lead.email) reviewReasons.push('no way to contact customer');\nif (!lead.address && triage.urgency !== 'routine') reviewReasons.push('no address for a dispatch');\nif (triage.classifiedBy === 'rules-fallback') reviewReasons.push('AI was down, rules were used');\nif (triage.jobType === 'install_quote') reviewReasons.push('sales lead — owner sets the quote');\n\n// --- Reply draft (NOT sent automatically) ---\nconst name = lead.name.split(' ')[0] || (es ? 'cliente' : 'there');\nlet replyDraft;\nif (triage.jobType === 'gas_or_co_safety') {\n  replyDraft = es\n    ? `Hola ${name}, le habla ${BUSINESS}. Si huele a gas o su alarma de monóxido suena, salga de la casa ahora y llame al 911 o a la compañía de gas desde afuera. Nuestro técnico llegará en 2-4 horas. ${PHONE}`\n    : `Hi ${name}, this is ${BUSINESS}. If you smell gas or your CO alarm is going off, leave the house now and call 911 or your gas company from outside. Our on-call tech is arriving within 2-4 hours. ${PHONE}`;\n} else if (triage.urgency === 'emergency') {\n  replyDraft = es\n    ? `Hola ${name}, le habla ${BUSINESS}. Tratamos su caso como emergencia: nuestro técnico llegará en 2-4 horas. Preguntas: ${PHONE}.`\n    : `Hi ${name}, this is ${BUSINESS}. We're treating this as an emergency — our on-call tech is arriving within 2-4 hours. Questions? ${PHONE}.`;\n} else if (triage.urgency === 'urgent') {\n  replyDraft = es\n    ? `Hola ${name}, gracias por contactar a ${BUSINESS}. Podemos enviarle un técnico ${timeWindow}. Responda SÍ para confirmar.`\n    : `Hi ${name}, thanks for contacting ${BUSINESS}. We can get a tech to you ${timeWindow}. Reply YES to lock it in.`;\n} else {\n  replyDraft = es\n    ? `Hola ${name}, ¡gracias por contactar a ${BUSINESS}! Próximas citas: ${timeWindow}. Responda con el día que le convenga.`\n    : `Hi ${name}, thanks for contacting ${BUSINESS}! Our next openings are ${timeWindow}. Reply with a day that works and we'll book it.`;\n}\n\nconst icon = triage.urgency === 'emergency' ? '🚨' : triage.urgency === 'urgent' ? '⚠️' : '🗓️';\nconst techAlert = `${icon} ${triage.summary}\\nCustomer: ${lead.name || 'unknown'} | ${lead.phone || 'no phone'} | ${lead.address || 'no address'}\\nWindow: ${timeWindow}\\nSpeaks: ${es ? 'Spanish' : 'English'}${reviewReasons.length ? ' | NEEDS OFFICE REVIEW: ' + reviewReasons.join('; ') : ''}`;\n\n// Flat row for the Google Sheet \"mini CRM\" (column names = sheet headers)\nreturn {\n  json: {\n    lead_id: lead.id, received_at: lead.receivedAt, name: lead.name, phone: lead.phone, email: lead.email, address: lead.address,\n    message: lead.message, language: triage.language, urgency: triage.urgency, job_type: triage.jobType, summary: triage.summary,\n    time_window: timeWindow, needs_review: reviewReasons.length ? 'YES' : 'no', review_reasons: reviewReasons.join('; '),\n    classified_by: triage.classifiedBy, confidence: triage.confidence, reply_draft: replyDraft,\n    status: reviewReasons.length ? 'waiting for office review' : 'reply ready to send',\n    tech_alert: techAlert,\n  },\n};\n"
+      }
+    },
+    {
+      "id": "a8",
+      "name": "Log to CRM (Google Sheet)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1320,
+        200
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": []
+        },
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "notes": "appendOrUpdate on lead_id = a double-submitted form updates the same row instead of making a duplicate."
+    },
+    {
+      "id": "a9",
+      "name": "Emergency or Urgent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $('Time Window, Review & Reply Draft').item.json.urgency }}",
+              "rightValue": "routine",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a10",
+      "name": "Ping On-Call Tech (Slack/Discord)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/REPLACE_WITH_YOUR_WEBHOOK",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $('Time Window, Review & Reply Draft').item.json.tech_alert, text: $('Time Window, Review & Reply Draft').item.json.tech_alert }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "A failed ping never blocks the lead. Paste a Discord or Slack incoming-webhook URL."
+    },
+    {
+      "id": "a11",
+      "name": "Send Result Back",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $('Time Window, Review & Reply Draft').item.json }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n1",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        -60
+      ],
+      "parameters": {
+        "width": 760,
+        "height": 200,
+        "content": "## HVAC Lead Autopilot — by Gabriel Nadal\nWeb form / text → AI triage (urgency, job type, language) → validation + rules fallback + gas/CO safety guardrail → time window + human-review checks → bilingual reply DRAFT → Google Sheet mini-CRM (deduped by lead_id) → ping on-call tech for urgent jobs.\nReply drafts are never auto-sent: an office manager approves them."
+      }
+    }
+  ],
+  "connections": {
+    "New Service Request (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Validate & Clean Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Clean Lead": {
+      "main": [
+        [
+          {
+            "node": "Has a Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has a Message?": {
+      "main": [
+        [
+          {
+            "node": "AI Triage (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Empty Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Triage (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Check AI Answer (fallback + guardrail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI Answer (fallback + guardrail)": {
+      "main": [
+        [
+          {
+            "node": "Time Window, Review & Reply Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time Window, Review & Reply Draft": {
+      "main": [
+        [
+          {
+            "node": "Log to CRM (Google Sheet)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to CRM (Google Sheet)": {
+      "main": [
+        [
+          {
+            "node": "Emergency or Urgent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Emergency or Urgent?": {
+      "main": [
+        [
+          {
+            "node": "Ping On-Call Tech (Slack/Discord)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Result Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping On-Call Tech (Slack/Discord)": {
+      "main": [
+        [
+          {
+            "node": "Send Result Back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false,
+  "tags": []
+}

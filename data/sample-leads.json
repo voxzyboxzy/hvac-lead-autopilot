@@ -1,0 +1,18 @@
+[
+  { "id": "L-1001", "name": "Maria Gonzalez", "phone": "305-555-0198", "address": "1420 SE 12th Ave, Homestead, FL", "source": "website form", "receivedAt": "2026-11-09T07:12:00-05:00",
+    "message": "Hola, el aire acondicionado no enfria y tengo un bebe de 3 meses en la casa. Por favor necesito ayuda hoy." },
+  { "id": "L-1002", "name": "James Carter", "phone": "(786) 555-0111", "address": "880 NE 8th St, Florida City, FL", "source": "google ads", "receivedAt": "2026-11-09T07:30:00-05:00",
+    "message": "I think I smell gas near the furnace closet and the CO detector chirped twice." },
+  { "id": "L-1003", "name": "Linda Park", "email": "linda.park@example.com", "address": "22 Palm Dr, Homestead, FL", "source": "website form", "receivedAt": "2026-11-09T08:05:00-05:00",
+    "message": "Looking to book a tune-up for our heat pump before winter. Anytime next week works, ideally tomorrow morning or after 3pm." },
+  { "id": "L-1004", "name": "Roberto Diaz", "phone": "3055550177", "source": "sms", "receivedAt": "2026-11-09T08:40:00-05:00",
+    "message": "Mi casa tiene una fuga de agua del air handler, esta goteando en el piso del closet. Gracias." },
+  { "id": "L-1005", "name": "Kevin O'Brien", "phone": "305.555.0123", "address": "15 Coral Way, Homestead, FL", "source": "facebook", "receivedAt": "2026-11-09T09:15:00-05:00",
+    "message": "Our system is 18 years old. Can I get a quote to replace it with a new heat pump? Are there rebates?" },
+  { "id": "L-1006", "name": "Sam", "source": "website form", "receivedAt": "2026-11-09T09:20:00-05:00",
+    "message": "hey can someone call me back, it's about my unit" },
+  { "id": "L-1001", "name": "Maria Gonzalez", "phone": "305-555-0198", "address": "1420 SE 12th Ave, Homestead, FL", "source": "website form (double submit)", "receivedAt": "2026-11-09T07:12:05-05:00",
+    "message": "Hola, el aire acondicionado no enfria y tengo un bebe de 3 meses en la casa. Por favor necesito ayuda hoy." },
+  { "id": "L-1007", "name": "Spam Bot", "source": "website form", "receivedAt": "2026-11-09T09:30:00-05:00",
+    "message": "   " }
+]
