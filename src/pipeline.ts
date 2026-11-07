@@ -5,7 +5,7 @@
 
 import type { Lead, ProcessedLead } from "./types.ts";
 import { classifyLead } from "./classify.ts";
-import { estimateTimeWindow } from "./schedule.ts";
+import { estimateTimeWindow, scheduleInstant } from "./schedule.ts";
 import { draftReply } from "./reply.ts";
 import { logToCrm } from "./crm.ts";
 import { buildTechAlert, notifyTech } from "./notify.ts";
@@ -19,9 +19,8 @@ export interface PipelineOptions {
 }
 
 export async function processLead(input: Lead, opts: PipelineOptions = {}): Promise<ProcessedLead & { crm?: string }> {
-  // Time windows are calculated from when the lead ARRIVED (falls back to right now).
-  const received = input?.receivedAt ? new Date(input.receivedAt) : undefined;
-  const now = opts.now ?? (received && !isNaN(received.getTime()) ? received : new Date());
+  // Tests pass opts.now. Otherwise use when the lead arrived, then the current time.
+  const now = scheduleInstant(input, opts.now);
 
   // 1. Validate + clean the input. A blank message is the one thing we can't work with.
   if (!input || typeof input.message !== "string" || input.message.trim() === "") {

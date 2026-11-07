@@ -1,29 +1,42 @@
-# Verification log (Nov 7, 2026 9:46 AM ET)
+# Verification log (Nov 7, 2026, America/New_York)
+
+Node.js 22. `npm test` is `node --test test/*.test.ts` (19 passing, including CLI/n8n schedule parity). `npm start` processes `data/sample-leads.json` with the rules engine.
 
 ## npm test
+
 ```
-✔ n8n: AI node deactivated -> rules engine, Spanish emergency (1.012336ms)
-✔ n8n: valid AI answer is used (0.215316ms)
-✔ n8n: AI error output -> rules fallback + flagged for review (0.242842ms)
-✔ n8n: AI says routine for a gas leak -> guardrail forces emergency (0.412756ms)
-✔ n8n: empty message is marked invalid (10.336884ms)
-✔ Spanish no-AC call with a baby is an emergency, answered in Spanish (1.664134ms)
-✔ gas smell always gets safety instructions (0.342561ms)
-✔ tune-up is routine and scheduled on business days (9.879054ms)
-✔ vague message with no contact info is flagged for a human (0.490754ms)
-✔ blank message is rejected (0.372796ms)
-✔ phone numbers are cleaned up, including ones typed inside the message (0.178254ms)
-✔ if the AI call fails, the rules fallback takes over and flags review (0.743679ms)
-✔ AI cannot downgrade a gas report (safety guardrail) (20.248003ms)
-✔ off-spec AI output is rejected (0.359005ms)
-✔ language detection (0.451033ms)
-✔ duplicate form submissions are not logged twice (0.994768ms)
-ℹ tests 16
-ℹ pass 16
+✔ n8n: AI node deactivated -> rules engine, Spanish emergency (10.239498ms)
+✔ n8n: valid AI answer is used (0.325681ms)
+✔ n8n: AI error output -> rules fallback + flagged for review (0.401119ms)
+✔ n8n: AI says routine for a gas leak -> guardrail forces emergency (0.375076ms)
+✔ n8n: empty message is marked invalid (0.541233ms)
+[classify] AI failed for lead t7: network down — using rules fallback
+✔ Spanish no-AC call with a baby is an emergency, answered in Spanish (11.428859ms)
+✔ gas smell always gets safety instructions (0.556736ms)
+✔ tune-up is routine and scheduled on business days (0.725269ms)
+✔ vague message with no contact info is flagged for a human (0.504978ms)
+✔ blank message is rejected (0.392267ms)
+✔ phone numbers are cleaned up, including ones typed inside the message (0.28646ms)
+✔ if the AI call fails, the rules fallback takes over and flags review (0.705966ms)
+✔ AI cannot downgrade a gas report (safety guardrail) (13.747588ms)
+✔ off-spec AI output is rejected (0.351504ms)
+✔ language detection (0.308774ms)
+✔ duplicate form submissions are not logged twice (1.127788ms)
+✔ sample leads: CLI pipeline and n8n code nodes schedule the same window (14.136647ms)
+✔ injected shop clocks match, including Nov 11-16 vs Nov 10-13 (1.412022ms)
+✔ workflow JSON reply node is the generated scheduler, not a second copy (0.551308ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
 ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 264.416241
 ```
 
 ## npm start
+
 ```
 
 HVAC Lead Autopilot — processing 8 leads using rules engine (mock AI — no API key set)
@@ -65,8 +78,8 @@ Done: 7 processed, 3 flagged for office review, 1 rejected.
 CRM: output/leads.csv | Tech alerts: output/tech-alerts.log
 ```
 
-## Real n8n run (n8n 2.46.6, self-hosted locally, Google Sheet node deactivated, OpenAI node active without a key, Discord URL left as placeholder)
-- Spanish no-AC lead: emergency, es reply, classified_by "rules-fallback", needs_review YES ("AI was down, rules were used"). The failed Discord ping did not block the response.
-- Gas lead (AI node off): emergency + gas_or_co_safety + "leave the house now" reply
-- Tune-up lead: routine/maintenance, window "Wed, Nov 11 - Mon, Nov 16"
-- Blank message: HTTP 400 {"error":"Lead is missing a message"}
+Routine sample leads (L-1003, L-1005, L-1006) arrive Monday, Nov 9, 2026 Eastern. Both the CLI and the n8n code nodes schedule them **Wed, Nov 11 – Mon, Nov 16**.
+
+## Why the Nov 7 demo showed Tue, Nov 10 – Fri, Nov 13
+
+[`docs/demo-results.png`](demo-results.png) is that local demo (Nov 7, 2026, 9:58 AM ET). The four webhook bodies did not include `receivedAt`, so the old n8n node scheduled from that Saturday morning: **Tue, Nov 10 – Fri, Nov 13**. The same instant now produces that window on both the CLI and the n8n code node. The sample file's Monday arrival time still produces Wed, Nov 11 – Mon, Nov 16 on both.

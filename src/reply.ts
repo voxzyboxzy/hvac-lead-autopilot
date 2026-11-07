@@ -3,6 +3,7 @@
 // The draft is NOT sent automatically — an office manager approves it first.
 
 import type { Lead, Triage } from "./types.ts";
+import { translateWindow } from "./schedule.ts";
 
 const BUSINESS = () => process.env.BUSINESS_NAME ?? "Homestead Comfort HVAC";
 const PHONE = () => process.env.BUSINESS_PHONE ?? "(305) 555-0142";
@@ -37,15 +38,6 @@ function spanish(name: string, t: Triage, when: string): string {
     return `Hola ${name}, gracias por contactar a ${BUSINESS()}. Podemos enviarle un técnico: ${cuando}. Responda SÍ para confirmar o díganos otra hora.`;
   }
   return `Hola ${name}, ¡gracias por contactar a ${BUSINESS()}! Con gusto le ayudamos. Nuestras próximas citas: ${cuando}. Responda con el día que le convenga y lo agendamos.`;
-}
-
-// Very small translation table for the time windows produced by schedule.ts.
-function translateWindow(when: string): string {
-  return when
-    .replace("Today — on-call tech dispatched, arrival within 2-4 hours", "hoy, llegada en 2-4 horas")
-    .replace("Today — afternoon slot (12pm-6pm)", "hoy en la tarde (12pm-6pm)")
-    .replace("Tomorrow — first morning slot (8am-11am)", "mañana temprano (8am-11am)")
-    .replace("— office will offer a 2-hour arrival window", "(le daremos una ventana de llegada de 2 horas)");
 }
 
 // Friendly wording for each job type in the customer reply.

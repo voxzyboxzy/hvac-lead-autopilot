@@ -58,13 +58,32 @@ flowchart TD
   M --> OUT
 ```
 
+## n8n workflow
+
+The importable workflow is [`n8n/hvac-lead-autopilot.workflow.json`](n8n/hvac-lead-autopilot.workflow.json). The diagram below is that file's nodes and connections (the sticky note is not a step). **AI Triage (OpenAI)** is set to `onError: continueRegularOutput`, and the next Code node falls back to the keyword rules when the AI call fails.
+
+```mermaid
+flowchart TD
+  A["New Service Request (Webhook)"] --> B["Validate & Clean Lead"]
+  B --> C{"Has a Message?"}
+  C -->|yes| D["AI Triage (OpenAI)"]
+  C -->|no| E["Reject Empty Request"]
+  D --> F["Check AI Answer (fallback + guardrail)"]
+  F --> G["Time Window, Review & Reply Draft"]
+  G --> H["Log to CRM (Google Sheet)"]
+  H --> I{"Emergency or Urgent?"}
+  I -->|"urgency is not routine"| J["Ping On-Call Tech (Slack/Discord)"]
+  I -->|routine| K["Send Result Back"]
+  J --> K
+```
+
 ## How it works
 
 1. **Validate & clean.** Rejects blank/spam submissions, normalizes any phone format to `(305) 555-1234`, and even finds a phone number typed inside the message.
 2. **AI triage.** An LLM (OpenAI `gpt-4o-mini`, JSON mode, temperature 0) returns `urgency`, `jobType`, `language`, a 1-line `summary`, `equipment`, `preferredTime` and `confidence`. Prompt: [`src/classify.ts`](src/classify.ts).
 3. **Never trust the AI blindly.** Every field is checked against an allowed list. If the call fails, times out or returns junk, a **keyword rules engine** (English + Spanish) takes over and the lead is flagged for review. The rules engine is also the "mock AI" used when no API key is set.
 4. **Safety guardrail.** If the message mentions gas or carbon monoxide, it is an emergency and the reply starts with "leave the house and call 911", **no matter what the AI said.** There is a test where the AI is wrong on purpose to prove this.
-5. **Time window.** Emergency: 2-4 hours. Urgent (no heat / no AC / leak): this afternoon if before 2pm, else first slot tomorrow. Routine: 2-5 business days, skipping weekends. Calculated from when the lead *arrived*.
+5. **Time window.** Emergency: 2-4 hours. Urgent (no heat / no AC / leak): this afternoon if before 2pm America/New_York, else first slot tomorrow. Routine: 2-5 business days, skipping weekends. The clock is the shop's timezone, taken from when the lead arrived (`receivedAt`). The CLI and the n8n Code node run the same function (`src/schedule-core.js`).
 6. **Human in the loop.** The lead is flagged for the office when the AI is unsure, there's no way to contact the customer, an urgent job has no address, the AI was down, or it's a sales quote (the owner sets prices).
 7. **Reply draft** in the customer's language from fixed templates, so wording to customers is predictable. Drafted, **never auto-sent**.
 8. **Mini CRM.** One row per lead in a CSV (script) or Google Sheet (n8n). Logging is **idempotent**: a double-submitted form doesn't create a second row or a second alert.
@@ -76,7 +95,7 @@ Needs **Node.js 22.18+** (runs `.ts` files directly, no install step, no depende
 
 ```bash
 npm start          # processes data/sample-leads.json -> output/leads.csv + output/tech-alerts.log
-npm test           # 16 tests: script + the n8n Code-node JavaScript
+npm test           # 19 tests: script, the n8n Code-node JavaScript, and CLI/n8n schedule parity
 npm run server     # webhook on http://localhost:3000/lead (same as the n8n Webhook node)
 ```
 
@@ -99,6 +118,10 @@ Optional: `cp .env.example .env`, add `OPENAI_API_KEY`, then `node --env-file=.e
 Done: 7 processed, 3 flagged for office review, 1 rejected.
 ```
 
+![Local demo on Nov 7, 2026](docs/demo-results.png)
+
+That screenshot is the local demo from Nov 7, 2026, 9:58 AM ET: the test run, `npm start` (7 processed, 3 flagged, 1 rejected), and 4 responses from the local n8n webhook with OpenAI, Google Sheets, and Slack disabled. The routine rows on it say **Tue, Nov 10 – Fri, Nov 13**. Those webhook bodies did not include `receivedAt`, so the workflow used that Saturday morning. The sample file's arrival time is Monday, Nov 9, which is **Wed, Nov 11 – Mon, Nov 16**. Both clocks now go through one scheduler.
+
 The sample data includes the bad-day cases on purpose: a Spanish message, a gas leak, a missing address, a vague message with no contact info, a double-submitted form, and a blank spam submission.
 
 ## Files
@@ -109,7 +132,8 @@ src/
   pipeline.ts   the whole workflow in one function — start here
   classify.ts   AI call + validation + fallback + safety guardrail
   rules.ts      bilingual keyword engine (mock AI / fallback)
-  schedule.ts   time windows (business days)
+  schedule.ts   re-exports the scheduler
+  schedule-core.js  time windows (business days in America/New_York), shared with n8n
   reply.ts      English/Spanish reply templates
   crm.ts        CSV mini CRM, deduped by lead id
   notify.ts     tech alert log + Slack/Discord webhook
@@ -117,8 +141,9 @@ src/
 n8n/
   hvac-lead-autopilot.workflow.json   import this into n8n
   code/*.js                           the JavaScript inside the 3 Code nodes
-  build-workflow.mjs                  regenerates the JSON from code/*.js
-test/           16 tests (node:test)
+  code/3-build-reply.body.js          reply node; the scheduler is prepended at build time
+  build-workflow.mjs                  regenerates the reply node and the JSON
+test/           19 tests (node:test)
 data/sample-leads.json
 SETUP.md        step-by-step n8n import + demo recording
 TALKING_POINTS.md

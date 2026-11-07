@@ -19,6 +19,8 @@ return {
       address: b.address || '',
       message,
       source: b.source || 'webhook',
+      // Schedule clock: the lead's arrival time, or "now" when the form didn't send one.
+      // The reply node turns this instant into a window in America/New_York.
       receivedAt: b.receivedAt || new Date().toISOString(),
     },
   },

@@ -10,8 +10,9 @@ import { processLead, normalizePhone } from "../src/pipeline.ts";
 import { classifyLead, validateTriage } from "../src/classify.ts";
 import { classifyWithRules, detectLanguage } from "../src/rules.ts";
 
-// Monday Nov 9 2026, 9:00 AM — fixed so time windows are predictable.
-const MONDAY_9AM = new Date(2026, 10, 9, 9, 0);
+// Monday Nov 9, 2026, 9:00 AM America/New_York. An absolute instant, so the
+// machine's timezone cannot move the business-day window.
+const MONDAY_9AM = new Date("2026-11-09T14:00:00.000Z");
 const dryRun = { now: MONDAY_9AM, apiKey: "", saveAndNotify: false };
 
 test("Spanish no-AC call with a baby is an emergency, answered in Spanish", async () => {

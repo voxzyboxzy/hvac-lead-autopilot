@@ -12,7 +12,7 @@ Plain steps, about 30-45 minutes total. You don't need to pay for anything.
    npm start
    npm test
    ```
-   You should see 8 leads processed and `pass 16`. The results are in `output/leads.csv` (opens in Excel).
+   You should see 8 leads processed and `pass 19`. The results are in `output/leads.csv` (opens in Excel).
 
 ---
 
